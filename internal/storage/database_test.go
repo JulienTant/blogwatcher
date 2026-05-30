@@ -42,7 +42,7 @@ func TestDatabaseCreatesFileAndCRUD(t *testing.T) {
 	require.NoError(t, err, "add articles bulk")
 	require.Equal(t, 2, count)
 
-	list, err := db.ListArticles(ctx, false, nil, nil, nil, nil)
+	list, err := db.ListArticles(ctx, ArticleFilter{})
 	require.NoError(t, err, "list articles")
 	require.Len(t, list, 2)
 
@@ -197,17 +197,17 @@ func TestListArticlesFiltersAndOrdering(t *testing.T) {
 	_, err = db.MarkArticleRead(ctx, first.ID)
 	require.NoError(t, err, "mark read")
 
-	all, err := db.ListArticles(ctx, false, nil, nil, nil, nil)
+	all, err := db.ListArticles(ctx, ArticleFilter{})
 	require.NoError(t, err, "list articles")
 	require.Len(t, all, 3)
 	require.Equal(t, second.ID, all[0].ID, "expected newest article first")
 
-	unread, err := db.ListArticles(ctx, true, nil, nil, nil, nil)
+	unread, err := db.ListArticles(ctx, ArticleFilter{UnreadOnly: true})
 	require.NoError(t, err, "list unread")
 	require.Len(t, unread, 2)
 
 	blogID := blogB.ID
-	filtered, err := db.ListArticles(ctx, false, &blogID, nil, nil, nil)
+	filtered, err := db.ListArticles(ctx, ArticleFilter{BlogID: &blogID})
 	require.NoError(t, err, "list by blog")
 	require.Len(t, filtered, 1)
 	require.Equal(t, blogB.ID, filtered[0].BlogID)
@@ -238,7 +238,7 @@ func TestBulkInsertDuplicateRollbackAndEmpty(t *testing.T) {
 	_, err = db.AddArticlesBulk(ctx, dupArticles)
 	require.Error(t, err, "expected bulk insert to fail on duplicate url")
 
-	articles, err := db.ListArticles(ctx, false, nil, nil, nil, nil)
+	articles, err := db.ListArticles(ctx, ArticleFilter{})
 	require.NoError(t, err, "list articles")
 	require.Len(t, articles, 1, "expected rollback on duplicate")
 }
@@ -353,38 +353,38 @@ func TestListArticlesFilterByCategory(t *testing.T) {
 
 	// Filter by "Go" - should return only the Go article
 	cat := "Go"
-	goArticles, err := db.ListArticles(ctx, false, nil, &cat, nil, nil)
+	goArticles, err := db.ListArticles(ctx, ArticleFilter{Category: &cat})
 	require.NoError(t, err, "list by category Go")
 	require.Len(t, goArticles, 1)
 	require.Equal(t, "Go Article", goArticles[0].Title)
 
 	// Filter by "Programming" - should return both categorized articles
 	cat = "Programming"
-	progArticles, err := db.ListArticles(ctx, false, nil, &cat, nil, nil)
+	progArticles, err := db.ListArticles(ctx, ArticleFilter{Category: &cat})
 	require.NoError(t, err, "list by category Programming")
 	require.Len(t, progArticles, 2)
 
 	// No filter - should return all 3
-	all, err := db.ListArticles(ctx, false, nil, nil, nil, nil)
+	all, err := db.ListArticles(ctx, ArticleFilter{})
 	require.NoError(t, err, "list all")
 	require.Len(t, all, 3)
 
 	// Case-insensitive match - "go" should match "Go"
 	cat = "go"
-	goLower, err := db.ListArticles(ctx, false, nil, &cat, nil, nil)
+	goLower, err := db.ListArticles(ctx, ArticleFilter{Category: &cat})
 	require.NoError(t, err, "list by category go (lowercase)")
 	require.Len(t, goLower, 1)
 	require.Equal(t, "Go Article", goLower[0].Title)
 
 	// Case-insensitive match - "PROGRAMMING" should match "Programming"
 	cat = "PROGRAMMING"
-	progUpper, err := db.ListArticles(ctx, false, nil, &cat, nil, nil)
+	progUpper, err := db.ListArticles(ctx, ArticleFilter{Category: &cat})
 	require.NoError(t, err, "list by category PROGRAMMING (uppercase)")
 	require.Len(t, progUpper, 2)
 
 	// Empty string category should return all
 	empty := ""
-	allEmpty, err := db.ListArticles(ctx, false, nil, &empty, nil, nil)
+	allEmpty, err := db.ListArticles(ctx, ArticleFilter{Category: &empty})
 	require.NoError(t, err, "list with empty category")
 	require.Len(t, allEmpty, 3)
 }
@@ -405,7 +405,7 @@ func TestBulkInsertWithCategories(t *testing.T) {
 	require.NoError(t, err, "bulk insert")
 	require.Equal(t, 2, count)
 
-	list, err := db.ListArticles(ctx, false, nil, nil, nil, nil)
+	list, err := db.ListArticles(ctx, ArticleFilter{})
 	require.NoError(t, err, "list articles")
 	require.Len(t, list, 2)
 
@@ -450,14 +450,14 @@ func TestListArticlesFilterByDate(t *testing.T) {
 	require.NoError(t, err, "add article without date")
 
 	t.Run("without filters returns all articles", func(t *testing.T) {
-		articles, err := db.ListArticles(ctx, false, nil, nil, nil, nil)
+		articles, err := db.ListArticles(ctx, ArticleFilter{})
 		require.NoError(t, err, "list articles")
 		require.Len(t, articles, 4, "should return all articles including no-date article")
 	})
 
 	t.Run("since filter inclusive", func(t *testing.T) {
 		since := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
-		articles, err := db.ListArticles(ctx, false, nil, nil, &since, nil)
+		articles, err := db.ListArticles(ctx, ArticleFilter{Since: &since})
 		require.NoError(t, err, "list articles with since filter")
 		require.Len(t, articles, 2, "should return articles on or after since date (Article2 and Article3)")
 		titles := []string{articles[0].Title, articles[1].Title}
@@ -467,7 +467,7 @@ func TestListArticlesFilterByDate(t *testing.T) {
 
 	t.Run("before filter exclusive", func(t *testing.T) {
 		before := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
-		articles, err := db.ListArticles(ctx, false, nil, nil, nil, &before)
+		articles, err := db.ListArticles(ctx, ArticleFilter{Before: &before})
 		require.NoError(t, err, "list articles with before filter")
 		require.Len(t, articles, 1, "should return articles before date (only Article1)")
 		require.Equal(t, "Article1", articles[0].Title, "should only include Article1 before before-date")
@@ -476,7 +476,7 @@ func TestListArticlesFilterByDate(t *testing.T) {
 	t.Run("combined filters", func(t *testing.T) {
 		since := time.Date(2024, 1, 10, 0, 0, 0, 0, time.UTC)
 		before := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
-		articles, err := db.ListArticles(ctx, false, nil, nil, &since, &before)
+		articles, err := db.ListArticles(ctx, ArticleFilter{Since: &since, Before: &before})
 		require.NoError(t, err, "list articles with combined filters")
 		require.Len(t, articles, 1, "should return only Article2 in range")
 		require.Equal(t, "Article2", articles[0].Title, "should only include Article2")
@@ -484,7 +484,7 @@ func TestListArticlesFilterByDate(t *testing.T) {
 
 	t.Run("nil published date excluded from filters", func(t *testing.T) {
 		since := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-		articles, err := db.ListArticles(ctx, false, nil, nil, &since, nil)
+		articles, err := db.ListArticles(ctx, ArticleFilter{Since: &since})
 		require.NoError(t, err, "list articles with since filter")
 		require.Len(t, articles, 3, "should exclude no-date article")
 
@@ -495,14 +495,14 @@ func TestListArticlesFilterByDate(t *testing.T) {
 
 	t.Run("after all dates", func(t *testing.T) {
 		since := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
-		articles, err := db.ListArticles(ctx, false, nil, nil, &since, nil)
+		articles, err := db.ListArticles(ctx, ArticleFilter{Since: &since})
 		require.NoError(t, err, "list articles with since filter after all dates")
 		require.Empty(t, articles, "should return empty result")
 	})
 
 	t.Run("before all dates", func(t *testing.T) {
 		before := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
-		articles, err := db.ListArticles(ctx, false, nil, nil, nil, &before)
+		articles, err := db.ListArticles(ctx, ArticleFilter{Before: &before})
 		require.NoError(t, err, "list articles with before filter before all dates")
 		require.Empty(t, articles, "should return empty result")
 	})
@@ -580,7 +580,7 @@ func TestDateFilterRespectsTimezoneEquivalence(t *testing.T) {
 	require.NoError(t, err, "add article")
 
 	since := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
-	articles, err := db.ListArticles(ctx, false, nil, nil, &since, nil)
+	articles, err := db.ListArticles(ctx, ArticleFilter{Since: &since})
 	require.NoError(t, err, "list articles")
 	require.Empty(t, articles, "JST article published before UTC midnight Jan 15 should be excluded")
 }
@@ -668,6 +668,134 @@ func TestMigrationPreservesUnparseableTimestamps(t *testing.T) {
 		RunWith(db.conn).QueryRowContext(ctx).Scan(&stored)
 	require.NoError(t, err)
 	require.Equal(t, garbage, stored, "unparseable timestamp should be preserved verbatim")
+}
+
+func TestListArticlesFilterBySearch(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	blog, err := db.AddBlog(ctx, model.Blog{Name: "Test", URL: "https://example.com"})
+	require.NoError(t, err, "add blog")
+
+	_, err = db.AddArticle(ctx, model.Article{BlogID: blog.ID, Title: "Golang concurrency patterns", URL: "https://example.com/go-concurrency"})
+	require.NoError(t, err, "add article")
+	_, err = db.AddArticle(ctx, model.Article{BlogID: blog.ID, Title: "Rust memory safety", URL: "https://example.com/rust-memory"})
+	require.NoError(t, err, "add article")
+	_, err = db.AddArticle(ctx, model.Article{BlogID: blog.ID, Title: "Python async pitfalls", URL: "https://example.com/python-async"})
+	require.NoError(t, err, "add article")
+
+	t.Run("search by single word", func(t *testing.T) {
+		articles, err := db.ListArticles(ctx, ArticleFilter{Search: "golang"})
+		require.NoError(t, err)
+		require.Len(t, articles, 1)
+		require.Equal(t, "Golang concurrency patterns", articles[0].Title)
+	})
+
+	t.Run("search is case-insensitive", func(t *testing.T) {
+		articles, err := db.ListArticles(ctx, ArticleFilter{Search: "GOLANG"})
+		require.NoError(t, err)
+		require.Len(t, articles, 1)
+		require.Equal(t, "Golang concurrency patterns", articles[0].Title)
+	})
+
+	t.Run("search with no matches returns empty", func(t *testing.T) {
+		articles, err := db.ListArticles(ctx, ArticleFilter{Search: "nonexistent"})
+		require.NoError(t, err)
+		require.Empty(t, articles)
+	})
+
+	t.Run("search combined with blog filter", func(t *testing.T) {
+		blogID := blog.ID
+		articles, err := db.ListArticles(ctx, ArticleFilter{Search: "rust", BlogID: &blogID})
+		require.NoError(t, err)
+		require.Len(t, articles, 1)
+		require.Equal(t, "Rust memory safety", articles[0].Title)
+	})
+
+	t.Run("search with apostrophe does not need escaping", func(t *testing.T) {
+		_, err := db.AddArticle(ctx, model.Article{
+			BlogID:      blog.ID,
+			Title:       "Don't fear the goroutine",
+			URL:         "https://example.com/dont",
+			Description: "You don't need to worry about goroutines",
+		})
+		require.NoError(t, err, "add article with apostrophe")
+
+		articles, err := db.ListArticles(ctx, ArticleFilter{Search: "don't"})
+		require.NoError(t, err)
+		require.Len(t, articles, 1, "should find article with apostrophe in query")
+		require.Equal(t, "Don't fear the goroutine", articles[0].Title)
+	})
+
+	t.Run("search matches body text", func(t *testing.T) {
+		_, err := db.AddArticle(ctx, model.Article{
+			BlogID:      blog.ID,
+			Title:       "Deep dive into channels",
+			URL:         "https://example.com/channels",
+			Description: "This article discusses golang concurrency channels in detail",
+		})
+		require.NoError(t, err, "add article with body text")
+
+		articles, err := db.ListArticles(ctx, ArticleFilter{Search: "channels"})
+		require.NoError(t, err)
+		require.Len(t, articles, 1, "should find article by body text match")
+		require.Equal(t, "Deep dive into channels", articles[0].Title)
+	})
+
+	t.Run("search combined with unread filter", func(t *testing.T) {
+		golangArticles, err := db.ListArticles(ctx, ArticleFilter{Search: "golang"})
+		require.NoError(t, err)
+		require.NotEmpty(t, golangArticles, "expected at least one article matching 'golang'")
+
+		for _, a := range golangArticles {
+			_, err = db.MarkArticleRead(ctx, a.ID)
+			require.NoError(t, err)
+		}
+
+		articles, err := db.ListArticles(ctx, ArticleFilter{Search: "golang", UnreadOnly: true})
+		require.NoError(t, err)
+		require.Empty(t, articles, "expected no unread articles matching 'golang' after marking all matching articles as read")
+	})
+}
+
+func TestListArticlesWithLimit(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	blog, err := db.AddBlog(ctx, model.Blog{Name: "Test", URL: "https://example.com"})
+	require.NoError(t, err, "add blog")
+
+	t1 := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC)
+	t3 := time.Date(2024, 1, 3, 10, 0, 0, 0, time.UTC)
+
+	_, err = db.AddArticle(ctx, model.Article{BlogID: blog.ID, Title: "First", URL: "https://example.com/1", DiscoveredDate: &t1})
+	require.NoError(t, err, "add article 1")
+	_, err = db.AddArticle(ctx, model.Article{BlogID: blog.ID, Title: "Second", URL: "https://example.com/2", DiscoveredDate: &t2})
+	require.NoError(t, err, "add article 2")
+	_, err = db.AddArticle(ctx, model.Article{BlogID: blog.ID, Title: "Third", URL: "https://example.com/3", DiscoveredDate: &t3})
+	require.NoError(t, err, "add article 3")
+
+	t.Run("limit returns fewer results", func(t *testing.T) {
+		articles, err := db.ListArticles(ctx, ArticleFilter{Limit: 2})
+		require.NoError(t, err)
+		require.Len(t, articles, 2)
+	})
+
+	t.Run("limit of 0 returns all", func(t *testing.T) {
+		articles, err := db.ListArticles(ctx, ArticleFilter{Limit: 0})
+		require.NoError(t, err)
+		require.Len(t, articles, 3)
+	})
+
+	t.Run("limit with offset", func(t *testing.T) {
+		articles, err := db.ListArticles(ctx, ArticleFilter{Limit: 1, Offset: 1})
+		require.NoError(t, err)
+		require.Len(t, articles, 1)
+		require.Equal(t, "Second", articles[0].Title)
+	})
 }
 
 func openTestDB(t *testing.T) *Database {

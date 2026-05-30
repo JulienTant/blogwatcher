@@ -20,6 +20,8 @@ type FeedArticle struct {
 	URL           string
 	PublishedDate *time.Time
 	Categories    []string
+	Description   string
+	Content       string
 }
 
 type FeedParseError struct {
@@ -76,6 +78,8 @@ func (f *Fetcher) ParseFeed(ctx context.Context, feedURL string) ([]FeedArticle,
 			URL:           link,
 			PublishedDate: pickPublishedDate(item),
 			Categories:    item.Categories,
+			Description:   item.Description,
+			Content:       item.Content,
 		})
 	}
 

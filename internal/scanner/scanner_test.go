@@ -58,7 +58,7 @@ func TestScanBlogRSS(t *testing.T) {
 	require.Equal(t, 2, result.NewArticles)
 	require.Equal(t, "rss", result.Source)
 
-	articles, err := db.ListArticles(ctx, false, nil, nil, nil, nil)
+	articles, err := db.ListArticles(ctx, storage.ArticleFilter{})
 	require.NoError(t, err, "list articles")
 	require.Len(t, articles, 2)
 }
@@ -204,7 +204,7 @@ func TestScanBlogRSSWithCategories(t *testing.T) {
 	require.NoError(t, scanErr)
 	require.Equal(t, 2, result.NewArticles)
 
-	articles, err := db.ListArticles(ctx, false, nil, nil, nil, nil)
+	articles, err := db.ListArticles(ctx, storage.ArticleFilter{})
 	require.NoError(t, err, "list articles")
 	require.Len(t, articles, 2)
 

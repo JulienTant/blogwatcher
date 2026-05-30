@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/JulienTant/blogwatcher-cli/internal/model"
 	"github.com/JulienTant/blogwatcher-cli/internal/opml"
@@ -100,38 +99,33 @@ func RemoveBlog(ctx context.Context, db *storage.Database, name string) error {
 	return err
 }
 
-func GetArticles(ctx context.Context, db *storage.Database, showAll bool, blogName string, category string, since *time.Time, before *time.Time) ([]model.Article, map[int64]string, error) {
-	var blogID *int64
-	if blogName != "" {
-		blog, err := db.GetBlogByName(ctx, blogName)
-		if err != nil {
-			return nil, nil, err
-		}
-		if blog == nil {
-			return nil, nil, BlogNotFoundError{Name: blogName}
-		}
-		blogID = &blog.ID
-	}
-
-	var categoryPtr *string
-	if category != "" {
-		categoryPtr = &category
-	}
-
-	articles, err := db.ListArticles(ctx, !showAll, blogID, categoryPtr, since, before)
+func GetArticles(ctx context.Context, db *storage.Database, filter storage.ArticleFilter) ([]model.Article, map[int64]string, error) {
+	articles, err := db.ListArticles(ctx, filter)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	blogNames, err := getBlogNames(ctx, db, articles)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return articles, blogNames, nil
+}
+
+func getBlogNames(ctx context.Context, db *storage.Database, articles []model.Article) (map[int64]string, error) {
+	if len(articles) == 0 {
+		return nil, nil
 	}
 	blogs, err := db.ListBlogs(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	blogNames := make(map[int64]string)
 	for _, blog := range blogs {
 		blogNames[blog.ID] = blog.Name
 	}
-
-	return articles, blogNames, nil
+	return blogNames, nil
 }
 
 func MarkArticleRead(ctx context.Context, db *storage.Database, articleID int64) (model.Article, error) {
@@ -151,29 +145,24 @@ func MarkArticleRead(ctx context.Context, db *storage.Database, articleID int64)
 	return *article, nil
 }
 
-func MarkAllArticlesRead(ctx context.Context, db *storage.Database, blogName string) ([]model.Article, error) {
-	var blogID *int64
-	if blogName != "" {
-		blog, err := db.GetBlogByName(ctx, blogName)
-		if err != nil {
-			return nil, err
-		}
-		if blog == nil {
-			return nil, BlogNotFoundError{Name: blogName}
-		}
-		blogID = &blog.ID
-	}
+func MarkAllArticlesRead(ctx context.Context, db *storage.Database, filter storage.ArticleFilter) ([]model.Article, error) {
+	filter.UnreadOnly = true
 
-	articles, err := db.ListArticles(ctx, true, blogID, nil, nil, nil)
+	articles, err := db.ListArticles(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
+	if len(articles) == 0 {
+		return articles, nil
+	}
 
-	for _, article := range articles {
-		_, err := db.MarkArticleRead(ctx, article.ID)
-		if err != nil {
-			return nil, err
-		}
+	ids := make([]int64, len(articles))
+	for i, a := range articles {
+		ids[i] = a.ID
+	}
+
+	if err := db.MarkArticlesRead(ctx, ids); err != nil {
+		return nil, err
 	}
 
 	return articles, nil

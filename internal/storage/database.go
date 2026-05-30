@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -31,6 +32,11 @@ const (
 	// --since/--before lexicographic comparison in ListArticles is stable
 	// regardless of the source precision.
 	sqliteWriteLayout = "2006-01-02T15:04:05Z"
+
+	// MaxListLimit is the maximum number of articles a caller may request via
+	// ArticleFilter.Limit. Callers that exceed it should be rejected by the
+	// CLI layer, not silently clamped.
+	MaxListLimit = 100
 )
 
 func DefaultDBPath() (string, error) {
@@ -46,6 +52,17 @@ type Database struct {
 	conn *sql.DB
 }
 
+type ArticleFilter struct {
+	UnreadOnly bool
+	BlogID     *int64
+	Category   *string
+	Since      *time.Time
+	Before     *time.Time
+	Search     string
+	Limit      int
+	Offset     int
+}
+
 func OpenDatabase(ctx context.Context, path string) (*Database, error) {
 	if path == "" {
 		var err error
@@ -59,11 +76,12 @@ func OpenDatabase(ctx context.Context, path string) (*Database, error) {
 		return nil, err
 	}
 
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", path)
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", path)
 	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
+	conn.SetMaxOpenConns(1)
 
 	db := &Database{path: path, conn: conn}
 	if err := db.migrate(); err != nil {
@@ -235,8 +253,8 @@ func (db *Database) AddArticle(ctx context.Context, article model.Article) (mode
 		return article, err
 	}
 	result, err := sq.Insert("articles").
-		Columns("blog_id", "title", "url", "published_date", "discovered_date", "is_read", "categories").
-		Values(article.BlogID, article.Title, article.URL, formatTimePtr(article.PublishedDate), formatTimePtr(article.DiscoveredDate), article.IsRead, cats).
+		Columns("blog_id", "title", "url", "published_date", "discovered_date", "is_read", "categories", "description", "content").
+		Values(article.BlogID, article.Title, article.URL, formatTimePtr(article.PublishedDate), formatTimePtr(article.DiscoveredDate), article.IsRead, cats, nullIfEmpty(article.Description), nullIfEmpty(article.Content)).
 		RunWith(db.conn).
 		ExecContext(ctx)
 	if err != nil {
@@ -260,7 +278,7 @@ func (db *Database) AddArticlesBulk(ctx context.Context, articles []model.Articl
 	}
 
 	insert := sq.Insert("articles").
-		Columns("blog_id", "title", "url", "published_date", "discovered_date", "is_read", "categories")
+		Columns("blog_id", "title", "url", "published_date", "discovered_date", "is_read", "categories", "description", "content")
 	for _, article := range articles {
 		cats, err := categoriesToJSON(article.Categories)
 		if err != nil {
@@ -277,6 +295,8 @@ func (db *Database) AddArticlesBulk(ctx context.Context, articles []model.Articl
 			formatTimePtr(article.DiscoveredDate),
 			article.IsRead,
 			cats,
+			nullIfEmpty(article.Description),
+			nullIfEmpty(article.Content),
 		)
 	}
 
@@ -295,7 +315,7 @@ func (db *Database) AddArticlesBulk(ctx context.Context, articles []model.Articl
 }
 
 func (db *Database) GetArticle(ctx context.Context, id int64) (*model.Article, error) {
-	row := sq.Select("id", "blog_id", "title", "url", "published_date", "discovered_date", "is_read", "categories").
+	row := sq.Select("id", "blog_id", "title", "url", "published_date", "discovered_date", "is_read", "categories", "description", "content").
 		From("articles").
 		Where(sq.Eq{"id": id}).
 		RunWith(db.conn).
@@ -304,7 +324,7 @@ func (db *Database) GetArticle(ctx context.Context, id int64) (*model.Article, e
 }
 
 func (db *Database) GetArticleByURL(ctx context.Context, url string) (*model.Article, error) {
-	row := sq.Select("id", "blog_id", "title", "url", "published_date", "discovered_date", "is_read", "categories").
+	row := sq.Select("id", "blog_id", "title", "url", "published_date", "discovered_date", "is_read", "categories", "description", "content").
 		From("articles").
 		Where(sq.Eq{"url": url}).
 		RunWith(db.conn).
@@ -371,27 +391,35 @@ func (db *Database) GetExistingArticleURLs(ctx context.Context, urls []string) (
 	return result, nil
 }
 
-func (db *Database) ListArticles(ctx context.Context, unreadOnly bool, blogID *int64, category *string, since *time.Time, before *time.Time) ([]model.Article, error) {
-	query := sq.Select("id", "blog_id", "title", "url", "published_date", "discovered_date", "is_read", "categories").
+func (db *Database) ListArticles(ctx context.Context, filter ArticleFilter) ([]model.Article, error) {
+	if filter.Search != "" {
+		return db.searchArticles(ctx, filter)
+	}
+
+	query := sq.Select("id", "blog_id", "title", "url", "published_date", "discovered_date", "is_read", "categories", "description", "content").
 		From("articles").
 		OrderBy("discovered_date DESC")
 
-	if unreadOnly {
+	if filter.UnreadOnly {
 		query = query.Where(sq.Eq{"is_read": false})
 	}
-	if blogID != nil {
-		query = query.Where(sq.Eq{"blog_id": *blogID})
+	if filter.BlogID != nil {
+		query = query.Where(sq.Eq{"blog_id": *filter.BlogID})
 	}
-	if category != nil && *category != "" {
-		// Categories are stored as a JSON string array. Use json_each()
-		// for exact element matching.
-		query = query.Where("EXISTS (SELECT 1 FROM json_each(categories) WHERE LOWER(json_each.value) = LOWER(?))", *category)
+	if filter.Category != nil && *filter.Category != "" {
+		query = query.Where("EXISTS (SELECT 1 FROM json_each(categories) WHERE LOWER(json_each.value) = LOWER(?))", *filter.Category)
 	}
-	if since != nil {
-		query = query.Where(sq.GtOrEq{"published_date": since.UTC().Format(sqliteWriteLayout)})
+	if filter.Since != nil {
+		query = query.Where(sq.GtOrEq{"published_date": filter.Since.UTC().Format(sqliteWriteLayout)})
 	}
-	if before != nil {
-		query = query.Where(sq.Lt{"published_date": before.UTC().Format(sqliteWriteLayout)})
+	if filter.Before != nil {
+		query = query.Where(sq.Lt{"published_date": filter.Before.UTC().Format(sqliteWriteLayout)})
+	}
+	if filter.Limit > 0 {
+		query = query.Limit(uint64(filter.Limit))
+	}
+	if filter.Offset > 0 {
+		query = query.Offset(uint64(filter.Offset))
 	}
 
 	rows, err := query.RunWith(db.conn).QueryContext(ctx)
@@ -417,6 +445,73 @@ func (db *Database) ListArticles(ctx context.Context, unreadOnly bool, blogID *i
 	return articles, rows.Err()
 }
 
+func (db *Database) searchArticles(ctx context.Context, filter ArticleFilter) ([]model.Article, error) {
+	query := sq.Select("a.id", "a.blog_id", "a.title", "a.url", "a.published_date", "a.discovered_date", "a.is_read", "a.categories", "a.description", "a.content").
+		From("articles a").
+		Join("articles_fts f ON a.id = f.rowid").
+		Where("articles_fts MATCH ?", escapeFTS5Query(filter.Search)).
+		OrderBy("f.rank")
+
+	if filter.UnreadOnly {
+		query = query.Where(sq.Eq{"a.is_read": false})
+	}
+	if filter.BlogID != nil {
+		query = query.Where(sq.Eq{"a.blog_id": *filter.BlogID})
+	}
+	if filter.Category != nil && *filter.Category != "" {
+		query = query.Where("EXISTS (SELECT 1 FROM json_each(a.categories) WHERE LOWER(json_each.value) = LOWER(?))", *filter.Category)
+	}
+	if filter.Since != nil {
+		query = query.Where(sq.GtOrEq{"a.published_date": filter.Since.UTC().Format(sqliteWriteLayout)})
+	}
+	if filter.Before != nil {
+		query = query.Where(sq.Lt{"a.published_date": filter.Before.UTC().Format(sqliteWriteLayout)})
+	}
+
+	if filter.Limit > 0 {
+		query = query.Limit(uint64(filter.Limit))
+	}
+	if filter.Offset > 0 {
+		query = query.Offset(uint64(filter.Offset))
+	}
+
+	rows, err := query.RunWith(db.conn).QueryContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "close rows: %v\n", err)
+		}
+	}()
+
+	var articles []model.Article
+	for rows.Next() {
+		article, err := scanArticle(rows)
+		if err != nil {
+			return nil, err
+		}
+		if article != nil {
+			articles = append(articles, *article)
+		}
+	}
+	return articles, rows.Err()
+}
+
+// escapeFTS5Query prepares a user-supplied search string for use in an FTS5
+// MATCH clause. Words containing characters that are not valid in bare FTS5
+// tokens (single quotes, double quotes) are wrapped in double quotes so they
+// are treated as phrase tokens rather than causing a syntax error.
+func escapeFTS5Query(q string) string {
+	words := strings.Fields(q)
+	for i, w := range words {
+		if strings.ContainsAny(w, "'\"") {
+			words[i] = `"` + strings.ReplaceAll(w, `"`, `""`) + `"`
+		}
+	}
+	return strings.Join(words, " ")
+}
+
 func (db *Database) MarkArticleRead(ctx context.Context, id int64) (bool, error) {
 	result, err := sq.Update("articles").
 		Set("is_read", true).
@@ -431,6 +526,18 @@ func (db *Database) MarkArticleRead(ctx context.Context, id int64) (bool, error)
 		return false, err
 	}
 	return rows > 0, nil
+}
+
+func (db *Database) MarkArticlesRead(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := sq.Update("articles").
+		Set("is_read", true).
+		Where(sq.Eq{"id": ids}).
+		RunWith(db.conn).
+		ExecContext(ctx)
+	return err
 }
 
 func (db *Database) MarkArticleUnread(ctx context.Context, id int64) (bool, error) {
@@ -492,8 +599,10 @@ func scanArticle(scanner interface{ Scan(dest ...any) error }) (*model.Article, 
 		discovered    sql.NullString
 		isRead        bool
 		categories    sql.NullString
+		description   sql.NullString
+		content       sql.NullString
 	)
-	if err := scanner.Scan(&id, &blogID, &title, &url, &publishedDate, &discovered, &isRead, &categories); err != nil {
+	if err := scanner.Scan(&id, &blogID, &title, &url, &publishedDate, &discovered, &isRead, &categories, &description, &content); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -506,12 +615,14 @@ func scanArticle(scanner interface{ Scan(dest ...any) error }) (*model.Article, 
 	}
 
 	article := &model.Article{
-		ID:         id,
-		BlogID:     blogID,
-		Title:      title,
-		URL:        url,
-		IsRead:     isRead,
-		Categories: cats,
+		ID:          id,
+		BlogID:      blogID,
+		Title:       title,
+		URL:         url,
+		IsRead:      isRead,
+		Categories:  cats,
+		Description: description.String,
+		Content:     content.String,
 	}
 	if publishedDate.Valid {
 		if parsed, err := parseTime(publishedDate.String); err == nil {

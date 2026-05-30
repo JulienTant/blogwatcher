@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
@@ -209,17 +208,8 @@ func (s *Scanner) ScanAllBlogs(ctx context.Context, db *storage.Database, worker
 
 	for i := 0; i < workers; i++ {
 		g.Go(func() error {
-			workerDB, openErr := storage.OpenDatabase(gctx, db.Path())
-			if openErr != nil {
-				return openErr
-			}
-			defer func() {
-				if closeErr := workerDB.Close(); closeErr != nil {
-					fmt.Fprintf(os.Stderr, "close: %v\n", closeErr)
-				}
-			}()
 			for item := range jobs {
-				result, scanErr := s.ScanBlog(gctx, workerDB, item.Blog)
+				result, scanErr := s.ScanBlog(gctx, db, item.Blog)
 				if scanErr != nil {
 					if isFatalScanError(scanErr) {
 						return fmt.Errorf("scan %s: %w", item.Blog.Name, scanErr)
@@ -277,6 +267,8 @@ func convertFeedArticles(blogID int64, articles []rss.FeedArticle) []model.Artic
 			PublishedDate: article.PublishedDate,
 			IsRead:        false,
 			Categories:    article.Categories,
+			Description:   article.Description,
+			Content:       article.Content,
 		})
 	}
 	return result
