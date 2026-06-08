@@ -12,6 +12,7 @@ A Go CLI tool to track blog articles, detect new posts, and manage read/unread s
 -   **Blog Filtering** - View articles from specific blogs
 -   **Duplicate Prevention** - Never tracks the same article twice
 -   **Colored CLI Output** - User-friendly terminal interface
+-   **JSON Output** - Machine-readable output for automation and agent integrations
 
 ## Installation
 
@@ -29,6 +30,24 @@ docker run --rm -v blogwatcher-cli:/data ghcr.io/julientant/blogwatcher-cli
 Pre-built binaries for Linux, macOS, and Windows are available on the [GitHub Releases](https://github.com/JulienTant/blogwatcher-cli/releases) page.
 
 ## Usage
+
+### Output Format
+
+Human-readable text output is the default. Use `--format json` for machine-readable output in scripts or agent integrations:
+
+```bash
+blogwatcher-cli add "xkcd" https://xkcd.com --feed-url https://xkcd.com/atom.xml --format json
+blogwatcher-cli blogs --format json
+blogwatcher-cli scan --format json
+blogwatcher-cli articles --format json
+blogwatcher-cli read 42 --format json
+blogwatcher-cli unread 42 --format json
+blogwatcher-cli read-all --yes --format json
+blogwatcher-cli remove "xkcd" --yes --format json
+blogwatcher-cli import subscriptions.opml --format json
+```
+
+You can also set `BLOGWATCHER_FORMAT=json`. Commands that normally prompt for confirmation (`remove`, `read-all`) require `--yes` in JSON mode.
 
 ### Adding Blogs
 

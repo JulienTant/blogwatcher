@@ -53,10 +53,13 @@ func newAddCommand() *cobra.Command {
 			name := args[0]
 			url := args[1]
 			return withDatabase(cmd, func(db *storage.Database) error {
-				_, err := controller.AddBlog(cmd.Context(), db, name, url, viper.GetString("feed-url"), viper.GetString("scrape-selector"))
+				blog, err := controller.AddBlog(cmd.Context(), db, name, url, viper.GetString("feed-url"), viper.GetString("scrape-selector"))
 				if err != nil {
 					printError(err)
 					return markError(err)
+				}
+				if isJSONOutput() {
+					return writeJSON(addBlogOutput{OK: true, Blog: newBlogOutput(blog)})
 				}
 				cprintf([]color.Attribute{color.FgGreen}, "Added blog '%s'\n", name)
 				return nil
@@ -76,6 +79,9 @@ func newRemoveCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			if !viper.GetBool("yes") {
+				if isJSONOutput() {
+					return fmt.Errorf("remove with --format json requires --yes")
+				}
 				confirmed, err := confirm(fmt.Sprintf("Remove blog '%s' and all its articles?", name))
 				if err != nil {
 					return err
@@ -88,6 +94,9 @@ func newRemoveCommand() *cobra.Command {
 				if err := controller.RemoveBlog(cmd.Context(), db, name); err != nil {
 					printError(err)
 					return markError(err)
+				}
+				if isJSONOutput() {
+					return writeJSON(removeBlogOutput{OK: true, Name: name})
 				}
 				cprintf([]color.Attribute{color.FgGreen}, "Removed blog '%s'\n", name)
 				return nil
@@ -107,6 +116,9 @@ func newBlogsCommand() *cobra.Command {
 				blogs, err := db.ListBlogs(cmd.Context())
 				if err != nil {
 					return err
+				}
+				if isJSONOutput() {
+					return writeJSON(newBlogsOutput(blogs))
 				}
 				if len(blogs) == 0 {
 					fmt.Println("No blogs tracked yet. Use 'blogwatcher-cli add' to add one.")
@@ -157,6 +169,9 @@ func newScanCommand() *cobra.Command {
 						printError(err)
 						return markError(err)
 					}
+					if isJSONOutput() {
+						return writeJSON(newScanOutput([]scanner.ScanResult{*result}))
+					}
 					if !silent {
 						printScanResult(*result)
 					}
@@ -166,10 +181,13 @@ func newScanCommand() *cobra.Command {
 						return err
 					}
 					if len(blogs) == 0 {
+						if isJSONOutput() {
+							return writeJSON(newScanOutput(nil))
+						}
 						fmt.Println("No blogs tracked yet. Use 'blogwatcher-cli add' to add one.")
 						return nil
 					}
-					if !silent {
+					if !silent && !isJSONOutput() {
 						cprintf([]color.Attribute{color.FgCyan}, "Scanning %d blog(s)...\n\n", len(blogs))
 					}
 					results, err := sc.ScanAllBlogs(cmd.Context(), db, workers)
@@ -179,7 +197,7 @@ func newScanCommand() *cobra.Command {
 					totalNew := 0
 					failed := 0
 					for _, result := range results {
-						if !silent {
+						if !silent && !isJSONOutput() {
 							printScanResult(result)
 						}
 						if result.Error != "" {
@@ -187,6 +205,9 @@ func newScanCommand() *cobra.Command {
 						} else {
 							totalNew += result.NewArticles
 						}
+					}
+					if isJSONOutput() {
+						return writeJSON(newScanOutput(results))
 					}
 					if !silent {
 						fmt.Println()
@@ -209,7 +230,7 @@ func newScanCommand() *cobra.Command {
 					}
 				}
 
-				if silent {
+				if silent && !isJSONOutput() {
 					fmt.Println("scan done")
 				}
 				return nil
@@ -239,6 +260,9 @@ func newArticlesCommand() *cobra.Command {
 				if err != nil {
 					printError(err)
 					return markError(err)
+				}
+				if isJSONOutput() {
+					return writeJSON(newArticlesOutput(articles, blogNames))
 				}
 				if len(articles) == 0 {
 					if showAll {
@@ -286,6 +310,11 @@ func newReadCommand() *cobra.Command {
 					printError(err)
 					return markError(err)
 				}
+				changed := !article.IsRead
+				if isJSONOutput() {
+					article.IsRead = true
+					return writeJSON(articleStatusOutput{OK: true, Action: "read", ArticleID: articleID, Changed: changed, Article: newArticleOutput(article, "")})
+				}
 				if article.IsRead {
 					fmt.Printf("Article %d is already marked as read.\n", articleID)
 				} else {
@@ -312,11 +341,17 @@ func newReadAllCommand() *cobra.Command {
 					return markError(err)
 				}
 				if len(articles) == 0 {
+					if isJSONOutput() {
+						return writeJSON(readAllOutput{OK: true, Blog: blogName, Count: 0, Articles: []articleOutput{}})
+					}
 					cprintln([]color.Attribute{color.FgGreen}, "No unread articles to mark as read.")
 					return nil
 				}
 
 				if !viper.GetBool("yes") {
+					if isJSONOutput() {
+						return fmt.Errorf("read-all with --format json requires --yes")
+					}
 					scope := "all blogs"
 					if blogName != "" {
 						scope = fmt.Sprintf("from '%s'", blogName)
@@ -334,6 +369,15 @@ func newReadAllCommand() *cobra.Command {
 				if err != nil {
 					printError(err)
 					return markError(err)
+				}
+
+				if isJSONOutput() {
+					out := readAllOutput{OK: true, Blog: blogName, Count: len(marked), Articles: make([]articleOutput, 0, len(marked))}
+					for _, article := range marked {
+						article.IsRead = true
+						out.Articles = append(out.Articles, newArticleOutput(article, ""))
+					}
+					return writeJSON(out)
 				}
 
 				cprintf([]color.Attribute{color.FgGreen}, "Marked %d article(s) as read\n", len(marked))
@@ -362,6 +406,11 @@ func newUnreadCommand() *cobra.Command {
 				if err != nil {
 					printError(err)
 					return markError(err)
+				}
+				changed := article.IsRead
+				if isJSONOutput() {
+					article.IsRead = false
+					return writeJSON(articleStatusOutput{OK: true, Action: "unread", ArticleID: articleID, Changed: changed, Article: newArticleOutput(article, "")})
 				}
 				if !article.IsRead {
 					fmt.Printf("Article %d is already marked as unread.\n", articleID)
@@ -395,6 +444,9 @@ func newImportCommand() *cobra.Command {
 				if err != nil {
 					printError(err)
 					return markError(err)
+				}
+				if isJSONOutput() {
+					return writeJSON(importOutput{OK: true, Added: added, Skipped: skipped})
 				}
 				cprintf([]color.Attribute{color.FgGreen}, "Imported %d blog(s), skipped %d duplicate(s)\n", added, skipped)
 				return nil

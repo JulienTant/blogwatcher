@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -407,6 +408,149 @@ func TestE2E(t *testing.T) {
 	}
 }
 
+func TestJSONOutput(t *testing.T) {
+	baseURL := startTestServer(t)
+
+	for _, mode := range []string{"flags", "env"} {
+		t.Run(mode, func(t *testing.T) {
+			c := &cliOpts{
+				mode:   mode,
+				dbPath: filepath.Join(t.TempDir(), "test.db"),
+			}
+
+			addOut := c.ok(t, []string{"add", "go-blog", baseURL + "/go/"}, map[string]string{
+				"feed-url": baseURL + "/go/feed.atom",
+				"format":   "json",
+			})
+			var added struct {
+				OK   bool `json:"ok"`
+				Blog struct {
+					Name string `json:"name"`
+					URL  string `json:"url"`
+				} `json:"blog"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(addOut), &added))
+			assert.True(t, added.OK)
+			assert.Equal(t, "go-blog", added.Blog.Name)
+
+			blogsOut := c.ok(t, []string{"blogs"}, map[string]string{"format": "json"})
+			var blogs struct {
+				Blogs []struct {
+					ID      int64  `json:"id"`
+					Name    string `json:"name"`
+					URL     string `json:"url"`
+					FeedURL string `json:"feed_url"`
+				} `json:"blogs"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(blogsOut), &blogs))
+			require.Len(t, blogs.Blogs, 1)
+			assert.Equal(t, "go-blog", blogs.Blogs[0].Name)
+			assert.Equal(t, baseURL+"/go/", blogs.Blogs[0].URL)
+			assert.Equal(t, baseURL+"/go/feed.atom", blogs.Blogs[0].FeedURL)
+
+			scanOut := c.ok(t, []string{"scan"}, map[string]string{"format": "json"})
+			var scan struct {
+				Scanned          int `json:"scanned"`
+				Succeeded        int `json:"succeeded"`
+				Failed           int `json:"failed"`
+				TotalNewArticles int `json:"total_new_articles"`
+				Results          []struct {
+					BlogName    string `json:"blog_name"`
+					NewArticles int    `json:"new_articles"`
+					TotalFound  int    `json:"total_found"`
+					Source      string `json:"source"`
+				} `json:"results"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(scanOut), &scan))
+			assert.Equal(t, 1, scan.Scanned)
+			assert.Equal(t, 1, scan.Succeeded)
+			assert.Equal(t, 0, scan.Failed)
+			assert.Equal(t, 3, scan.TotalNewArticles)
+			require.Len(t, scan.Results, 1)
+			assert.Equal(t, "go-blog", scan.Results[0].BlogName)
+			assert.Equal(t, "rss", scan.Results[0].Source)
+
+			articlesOut := c.ok(t, []string{"articles"}, map[string]string{"format": "json"})
+			var articles struct {
+				Articles []struct {
+					ID         int64    `json:"id"`
+					BlogID     int64    `json:"blog_id"`
+					Blog       string   `json:"blog"`
+					Title      string   `json:"title"`
+					URL        string   `json:"url"`
+					IsRead     bool     `json:"is_read"`
+					Categories []string `json:"categories"`
+				} `json:"articles"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(articlesOut), &articles))
+			require.Len(t, articles.Articles, 3)
+			assert.Equal(t, "go-blog", articles.Articles[0].Blog)
+			assert.NotEmpty(t, articles.Articles[0].Title)
+			assert.NotEmpty(t, articles.Articles[0].URL)
+			articleID := fmt.Sprintf("%d", articles.Articles[0].ID)
+
+			readOut := c.ok(t, []string{"read", articleID}, map[string]string{"format": "json"})
+			var readResult struct {
+				OK        bool   `json:"ok"`
+				Action    string `json:"action"`
+				ArticleID int64  `json:"article_id"`
+				Changed   bool   `json:"changed"`
+				Article   struct {
+					IsRead bool `json:"is_read"`
+				} `json:"article"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(readOut), &readResult))
+			assert.True(t, readResult.OK)
+			assert.Equal(t, "read", readResult.Action)
+			assert.True(t, readResult.Changed)
+			assert.True(t, readResult.Article.IsRead)
+
+			unreadOut := c.ok(t, []string{"unread", articleID}, map[string]string{"format": "json"})
+			var unreadResult struct {
+				OK      bool   `json:"ok"`
+				Action  string `json:"action"`
+				Changed bool   `json:"changed"`
+				Article struct {
+					IsRead bool `json:"is_read"`
+				} `json:"article"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(unreadOut), &unreadResult))
+			assert.True(t, unreadResult.OK)
+			assert.Equal(t, "unread", unreadResult.Action)
+			assert.True(t, unreadResult.Changed)
+			assert.False(t, unreadResult.Article.IsRead)
+
+			readAllOut := c.ok(t, []string{"read-all"}, map[string]string{"yes": "", "format": "json"})
+			var readAll struct {
+				OK    bool `json:"ok"`
+				Count int  `json:"count"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(readAllOut), &readAll))
+			assert.True(t, readAll.OK)
+			assert.Greater(t, readAll.Count, 0)
+
+			removeOut := c.ok(t, []string{"remove", "go-blog"}, map[string]string{"yes": "", "format": "json"})
+			var removed struct {
+				OK   bool   `json:"ok"`
+				Name string `json:"name"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(removeOut), &removed))
+			assert.True(t, removed.OK)
+			assert.Equal(t, "go-blog", removed.Name)
+		})
+	}
+}
+
+func TestInvalidOutputFormat(t *testing.T) {
+	c := &cliOpts{
+		mode:   "flags",
+		dbPath: filepath.Join(t.TempDir(), "test.db"),
+	}
+	_, stderr, code := c.run(t, []string{"blogs"}, map[string]string{"format": "xml"})
+	assert.NotEqual(t, 0, code)
+	assert.Contains(t, stderr, `invalid output format "xml": expected text or json`)
+}
+
 func TestAddBlogInvalidURL(t *testing.T) {
 	for _, mode := range []string{"flags", "env"} {
 		t.Run(mode, func(t *testing.T) {
@@ -464,6 +608,19 @@ func TestImportOPML(t *testing.T) {
 			// Import the OPML file.
 			out := c.ok(t, []string{"import", opmlPath}, nil)
 			checkOutput(t, "30_import_opml", out, baseURL)
+
+			jsonDB := filepath.Join(t.TempDir(), "json-test.db")
+			jsonCLI := &cliOpts{mode: mode, dbPath: jsonDB}
+			jsonOut := jsonCLI.ok(t, []string{"import", opmlPath}, map[string]string{"format": "json"})
+			var imported struct {
+				OK      bool `json:"ok"`
+				Added   int  `json:"added"`
+				Skipped int  `json:"skipped"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(jsonOut), &imported))
+			assert.True(t, imported.OK)
+			assert.Equal(t, 2, imported.Added)
+			assert.Equal(t, 0, imported.Skipped)
 
 			// Verify blogs appear in list.
 			out = c.ok(t, []string{"blogs"}, nil)
