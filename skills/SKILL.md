@@ -54,6 +54,23 @@ All flags can be set via environment variables with the `BLOGWATCHER_` prefix:
 - `BLOGWATCHER_CATEGORY` - Filter articles by category
 - `BLOGWATCHER_SINCE` - Filter articles published on or after `YYYY-MM-DD`
 - `BLOGWATCHER_BEFORE` - Filter articles published before `YYYY-MM-DD`
+- `BLOGWATCHER_FORMAT` - Output format (`text` or `json`)
+
+## Agent automation
+
+When using this tool from an agent or script, prefer `--format json` for machine-readable output:
+
+- `blogwatcher-cli add "My Blog" https://example.com --format json`
+- `blogwatcher-cli blogs --format json`
+- `blogwatcher-cli scan --format json`
+- `blogwatcher-cli articles --format json`
+- `blogwatcher-cli read 1 --format json`
+- `blogwatcher-cli unread 1 --format json`
+- `blogwatcher-cli read-all --yes --format json`
+- `blogwatcher-cli remove "My Blog" --yes --format json`
+- `blogwatcher-cli import subscriptions.opml --format json`
+
+Commands that normally prompt for confirmation (`remove`, `read-all`) require `--yes` in JSON mode. Use text output only when the user explicitly wants terminal-style output.
 
 ## Example output
 
