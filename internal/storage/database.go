@@ -113,8 +113,8 @@ func (db *Database) migrate() error {
 
 func (db *Database) AddBlog(ctx context.Context, blog model.Blog) (model.Blog, error) {
 	result, err := sq.Insert("blogs").
-		Columns("name", "url", "feed_url", "scrape_selector", "last_scanned").
-		Values(blog.Name, blog.URL, nullIfEmpty(blog.FeedURL), nullIfEmpty(blog.ScrapeSelector), formatTimePtr(blog.LastScanned)).
+		Columns("name", "url", "feed_url", "scrape_selector", "group_name", "last_scanned").
+		Values(blog.Name, blog.URL, nullIfEmpty(blog.FeedURL), nullIfEmpty(blog.ScrapeSelector), nullIfEmpty(blog.Group), formatTimePtr(blog.LastScanned)).
 		RunWith(db.conn).
 		ExecContext(ctx)
 	if err != nil {
@@ -129,7 +129,7 @@ func (db *Database) AddBlog(ctx context.Context, blog model.Blog) (model.Blog, e
 }
 
 func (db *Database) GetBlog(ctx context.Context, id int64) (*model.Blog, error) {
-	row := sq.Select("id", "name", "url", "feed_url", "scrape_selector", "last_scanned").
+	row := sq.Select("id", "name", "url", "feed_url", "scrape_selector", "group_name", "last_scanned").
 		From("blogs").
 		Where(sq.Eq{"id": id}).
 		RunWith(db.conn).
@@ -138,7 +138,7 @@ func (db *Database) GetBlog(ctx context.Context, id int64) (*model.Blog, error) 
 }
 
 func (db *Database) GetBlogByName(ctx context.Context, name string) (*model.Blog, error) {
-	row := sq.Select("id", "name", "url", "feed_url", "scrape_selector", "last_scanned").
+	row := sq.Select("id", "name", "url", "feed_url", "scrape_selector", "group_name", "last_scanned").
 		From("blogs").
 		Where(sq.Eq{"name": name}).
 		RunWith(db.conn).
@@ -147,7 +147,7 @@ func (db *Database) GetBlogByName(ctx context.Context, name string) (*model.Blog
 }
 
 func (db *Database) GetBlogByURL(ctx context.Context, url string) (*model.Blog, error) {
-	row := sq.Select("id", "name", "url", "feed_url", "scrape_selector", "last_scanned").
+	row := sq.Select("id", "name", "url", "feed_url", "scrape_selector", "group_name", "last_scanned").
 		From("blogs").
 		Where(sq.Eq{"url": url}).
 		RunWith(db.conn).
@@ -155,12 +155,16 @@ func (db *Database) GetBlogByURL(ctx context.Context, url string) (*model.Blog, 
 	return scanBlog(row)
 }
 
-func (db *Database) ListBlogs(ctx context.Context) ([]model.Blog, error) {
-	rows, err := sq.Select("id", "name", "url", "feed_url", "scrape_selector", "last_scanned").
+func (db *Database) ListBlogs(ctx context.Context, groupName *string) ([]model.Blog, error) {
+	query := sq.Select("id", "name", "url", "feed_url", "scrape_selector", "group_name", "last_scanned").
 		From("blogs").
-		OrderBy("name").
-		RunWith(db.conn).
-		QueryContext(ctx)
+		OrderBy("name")
+
+	if groupName != nil && *groupName != "" {
+		query = query.Where("LOWER(group_name) = LOWER(?)", *groupName)
+	}
+
+	rows, err := query.RunWith(db.conn).QueryContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -189,6 +193,7 @@ func (db *Database) UpdateBlog(ctx context.Context, blog model.Blog) error {
 		Set("url", blog.URL).
 		Set("feed_url", nullIfEmpty(blog.FeedURL)).
 		Set("scrape_selector", nullIfEmpty(blog.ScrapeSelector)).
+		Set("group_name", nullIfEmpty(blog.Group)).
 		Set("last_scanned", formatTimePtr(blog.LastScanned)).
 		Where(sq.Eq{"id": blog.ID}).
 		RunWith(db.conn).
@@ -371,7 +376,7 @@ func (db *Database) GetExistingArticleURLs(ctx context.Context, urls []string) (
 	return result, nil
 }
 
-func (db *Database) ListArticles(ctx context.Context, unreadOnly bool, blogID *int64, category *string, since *time.Time, before *time.Time) ([]model.Article, error) {
+func (db *Database) ListArticles(ctx context.Context, unreadOnly bool, blogID *int64, category *string, groupName *string, since *time.Time, before *time.Time) ([]model.Article, error) {
 	query := sq.Select("id", "blog_id", "title", "url", "published_date", "discovered_date", "is_read", "categories").
 		From("articles").
 		OrderBy("discovered_date DESC")
@@ -386,6 +391,9 @@ func (db *Database) ListArticles(ctx context.Context, unreadOnly bool, blogID *i
 		// Categories are stored as a JSON string array. Use json_each()
 		// for exact element matching.
 		query = query.Where("EXISTS (SELECT 1 FROM json_each(categories) WHERE LOWER(json_each.value) = LOWER(?))", *category)
+	}
+	if groupName != nil && *groupName != "" {
+		query = query.Where("blog_id IN (SELECT id FROM blogs WHERE LOWER(group_name) = LOWER(?))", *groupName)
 	}
 	if since != nil {
 		query = query.Where(sq.GtOrEq{"published_date": since.UTC().Format(sqliteWriteLayout)})
@@ -458,9 +466,10 @@ func scanBlog(scanner interface{ Scan(dest ...any) error }) (*model.Blog, error)
 		url            string
 		feedURL        sql.NullString
 		scrapeSelector sql.NullString
+		groupName      sql.NullString
 		lastScanned    sql.NullString
 	)
-	if err := scanner.Scan(&id, &name, &url, &feedURL, &scrapeSelector, &lastScanned); err != nil {
+	if err := scanner.Scan(&id, &name, &url, &feedURL, &scrapeSelector, &groupName, &lastScanned); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -473,6 +482,7 @@ func scanBlog(scanner interface{ Scan(dest ...any) error }) (*model.Blog, error)
 		URL:            url,
 		FeedURL:        feedURL.String,
 		ScrapeSelector: scrapeSelector.String,
+		Group:          groupName.String,
 	}
 	if lastScanned.Valid {
 		if parsed, err := parseTime(lastScanned.String); err == nil {
