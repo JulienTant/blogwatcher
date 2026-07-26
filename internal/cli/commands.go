@@ -53,7 +53,7 @@ func newAddCommand() *cobra.Command {
 			name := args[0]
 			url := args[1]
 			return withDatabase(cmd, func(db *storage.Database) error {
-				_, err := controller.AddBlog(cmd.Context(), db, name, url, viper.GetString("feed-url"), viper.GetString("scrape-selector"))
+				_, err := controller.AddBlog(cmd.Context(), db, name, url, viper.GetString("feed-url"), viper.GetString("scrape-selector"), viper.GetString("group"))
 				if err != nil {
 					printError(err)
 					return markError(err)
@@ -65,6 +65,7 @@ func newAddCommand() *cobra.Command {
 	}
 	cmd.Flags().String("feed-url", "", "RSS/Atom feed URL (auto-discovered if not provided)")
 	cmd.Flags().String("scrape-selector", "", "CSS selector for HTML scraping fallback")
+	cmd.Flags().StringP("group", "g", "", "Group name for organizing this blog")
 	return cmd
 }
 
@@ -104,12 +105,17 @@ func newBlogsCommand() *cobra.Command {
 		Short: "List all tracked blogs.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withDatabase(cmd, func(db *storage.Database) error {
-				blogs, err := db.ListBlogs(cmd.Context())
+				group := viper.GetString("group")
+				blogs, err := db.ListBlogs(cmd.Context(), stringPtrOrNil(group))
 				if err != nil {
 					return err
 				}
 				if len(blogs) == 0 {
-					fmt.Println("No blogs tracked yet. Use 'blogwatcher-cli add' to add one.")
+					if group != "" {
+						fmt.Printf("No blogs found in group '%s'.\n", group)
+					} else {
+						fmt.Println("No blogs tracked yet. Use 'blogwatcher-cli add' to add one.")
+					}
 					return nil
 				}
 				cprintf([]color.Attribute{color.FgCyan, color.Bold}, "Tracked blogs (%d):\n\n", len(blogs))
@@ -122,6 +128,9 @@ func newBlogsCommand() *cobra.Command {
 					if blog.ScrapeSelector != "" {
 						fmt.Printf("    Selector: %s\n", blog.ScrapeSelector)
 					}
+					if blog.Group != "" {
+						fmt.Printf("    Group: %s\n", blog.Group)
+					}
 					if blog.LastScanned != nil {
 						fmt.Printf("    Last scanned: %s\n", blog.LastScanned.Format("2006-01-02 15:04"))
 					}
@@ -131,6 +140,7 @@ func newBlogsCommand() *cobra.Command {
 			})
 		},
 	}
+	cmd.Flags().StringP("group", "g", "", "Filter by group name")
 	return cmd
 }
 
@@ -161,18 +171,23 @@ func newScanCommand() *cobra.Command {
 						printScanResult(*result)
 					}
 				} else {
-					blogs, err := db.ListBlogs(cmd.Context())
+					groupName := viper.GetString("group")
+					blogs, err := db.ListBlogs(cmd.Context(), stringPtrOrNil(groupName))
 					if err != nil {
 						return err
 					}
 					if len(blogs) == 0 {
-						fmt.Println("No blogs tracked yet. Use 'blogwatcher-cli add' to add one.")
+						if groupName != "" {
+							fmt.Printf("No blogs found in group '%s'.\n", groupName)
+						} else {
+							fmt.Println("No blogs tracked yet. Use 'blogwatcher-cli add' to add one.")
+						}
 						return nil
 					}
 					if !silent {
 						cprintf([]color.Attribute{color.FgCyan}, "Scanning %d blog(s)...\n\n", len(blogs))
 					}
-					results, err := sc.ScanAllBlogs(cmd.Context(), db, workers)
+					results, err := sc.ScanAllBlogs(cmd.Context(), db, workers, groupName)
 					if err != nil {
 						return err
 					}
@@ -218,6 +233,7 @@ func newScanCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolP("silent", "s", false, "Only output 'scan done' when complete")
 	cmd.Flags().IntP("workers", "w", 8, "Number of concurrent workers when scanning all blogs")
+	cmd.Flags().StringP("group", "g", "", "Only scan blogs in this group")
 	return cmd
 }
 
@@ -235,7 +251,7 @@ func newArticlesCommand() *cobra.Command {
 			}
 
 			return withDatabase(cmd, func(db *storage.Database) error {
-				articles, blogNames, err := controller.GetArticles(cmd.Context(), db, showAll, viper.GetString("blog"), viper.GetString("category"), since, before)
+				articles, blogNames, err := controller.GetArticles(cmd.Context(), db, showAll, viper.GetString("blog"), viper.GetString("category"), viper.GetString("group"), since, before)
 				if err != nil {
 					printError(err)
 					return markError(err)
@@ -265,6 +281,7 @@ func newArticlesCommand() *cobra.Command {
 	cmd.Flags().BoolP("all", "a", false, "Show all articles (including read)")
 	cmd.Flags().StringP("blog", "b", "", "Filter by blog name")
 	cmd.Flags().StringP("category", "c", "", "Filter by category")
+	cmd.Flags().StringP("group", "g", "", "Filter by group name")
 	cmd.Flags().String("since", "", "Show articles published on or after YYYY-MM-DD")
 	cmd.Flags().String("before", "", "Show articles published before YYYY-MM-DD")
 	return cmd
@@ -306,7 +323,7 @@ func newReadAllCommand() *cobra.Command {
 			blogName := viper.GetString("blog")
 
 			return withDatabase(cmd, func(db *storage.Database) error {
-				articles, _, err := controller.GetArticles(cmd.Context(), db, false, blogName, "", nil, nil)
+				articles, _, err := controller.GetArticles(cmd.Context(), db, false, blogName, "", "", nil, nil)
 				if err != nil {
 					printError(err)
 					return markError(err)
@@ -472,6 +489,13 @@ func csprint(attrs []color.Attribute, a ...any) string {
 
 func csprintf(attrs []color.Attribute, format string, a ...any) string {
 	return color.New(attrs...).Sprintf(format, a...)
+}
+
+func stringPtrOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func parseID(value string) (int64, error) {
