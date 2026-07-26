@@ -1,0 +1,7 @@
+Tracked blogs (1):
+
+  go-blog-2
+    URL: {{SERVER}}/rust/
+    Selector: .post-list td a[href]
+    Group: Team A
+

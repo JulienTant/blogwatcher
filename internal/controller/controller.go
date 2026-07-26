@@ -58,7 +58,7 @@ func validateHTTPURL(s string) error {
 	return nil
 }
 
-func AddBlog(ctx context.Context, db *storage.Database, name string, urlStr string, feedURL string, scrapeSelector string) (model.Blog, error) {
+func AddBlog(ctx context.Context, db *storage.Database, name string, urlStr string, feedURL string, scrapeSelector string, group string) (model.Blog, error) {
 	if err := validateHTTPURL(urlStr); err != nil {
 		return model.Blog{}, err
 	}
@@ -84,6 +84,7 @@ func AddBlog(ctx context.Context, db *storage.Database, name string, urlStr stri
 		URL:            urlStr,
 		FeedURL:        feedURL,
 		ScrapeSelector: scrapeSelector,
+		Group:          group,
 	}
 	return db.AddBlog(ctx, blog)
 }
@@ -100,7 +101,7 @@ func RemoveBlog(ctx context.Context, db *storage.Database, name string) error {
 	return err
 }
 
-func GetArticles(ctx context.Context, db *storage.Database, showAll bool, blogName string, category string, since *time.Time, before *time.Time) ([]model.Article, map[int64]string, error) {
+func GetArticles(ctx context.Context, db *storage.Database, showAll bool, blogName string, category string, group string, since *time.Time, before *time.Time) ([]model.Article, map[int64]string, error) {
 	var blogID *int64
 	if blogName != "" {
 		blog, err := db.GetBlogByName(ctx, blogName)
@@ -118,11 +119,16 @@ func GetArticles(ctx context.Context, db *storage.Database, showAll bool, blogNa
 		categoryPtr = &category
 	}
 
-	articles, err := db.ListArticles(ctx, !showAll, blogID, categoryPtr, since, before)
+	var groupPtr *string
+	if group != "" {
+		groupPtr = &group
+	}
+
+	articles, err := db.ListArticles(ctx, !showAll, blogID, categoryPtr, groupPtr, since, before)
 	if err != nil {
 		return nil, nil, err
 	}
-	blogs, err := db.ListBlogs(ctx)
+	blogs, err := db.ListBlogs(ctx, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -164,7 +170,7 @@ func MarkAllArticlesRead(ctx context.Context, db *storage.Database, blogName str
 		blogID = &blog.ID
 	}
 
-	articles, err := db.ListArticles(ctx, true, blogID, nil, nil, nil)
+	articles, err := db.ListArticles(ctx, true, blogID, nil, nil, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +199,7 @@ func ImportOPML(ctx context.Context, db *storage.Database, r io.Reader) (added i
 		if title == "" {
 			title = siteURL
 		}
-		_, err := AddBlog(ctx, db, title, siteURL, feed.FeedURL, "")
+		_, err := AddBlog(ctx, db, title, siteURL, feed.FeedURL, "", "")
 		if err != nil {
 			var alreadyExists BlogAlreadyExistsError
 			var invalidURL InvalidURLError

@@ -177,8 +177,12 @@ func (s *Scanner) ScanBlog(ctx context.Context, db *storage.Database, blog model
 	}, nil
 }
 
-func (s *Scanner) ScanAllBlogs(ctx context.Context, db *storage.Database, workers int) ([]ScanResult, error) {
-	blogs, err := db.ListBlogs(ctx)
+func (s *Scanner) ScanAllBlogs(ctx context.Context, db *storage.Database, workers int, groupName string) ([]ScanResult, error) {
+	var groupPtr *string
+	if groupName != "" {
+		groupPtr = &groupName
+	}
+	blogs, err := db.ListBlogs(ctx, groupPtr)
 	if err != nil {
 		return nil, err
 	}

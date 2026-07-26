@@ -1,0 +1,21 @@
+Unread articles (5):
+
+  [ID] [new] Announcing Rust 1.94.0
+       Blog: go-blog-2
+       URL: https://blog.rust-lang.org/2026/03/05/Rust-1.94.0/
+
+  [ID] [new] Announcing Rust 1.94.1
+       Blog: go-blog-2
+       URL: https://blog.rust-lang.org/2026/03/26/1.94.1-release/
+
+  [ID] [new] Security advisory for Cargo
+       Blog: go-blog-2
+       URL: https://blog.rust-lang.org/2026/03/21/cve-2026-33056/
+
+  [ID] [new] What we heard about Rust's challenges
+       Blog: go-blog-2
+       URL: https://blog.rust-lang.org/2026/03/20/rust-challenges/
+
+  [ID] [new] docs.rs: building fewer targets by default
+       Blog: go-blog-2
+       URL: https://blog.rust-lang.org/2026/04/04/docsrs-only-default-targets/

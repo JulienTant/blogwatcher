@@ -17,17 +17,32 @@ func TestAddBlogAndRemoveBlog(t *testing.T) {
 	db := openTestDB(t)
 	defer func() { require.NoError(t, db.Close()) }()
 
-	blog, err := AddBlog(ctx, db, "Test", "https://example.com", "", "")
+	blog, err := AddBlog(ctx, db, "Test", "https://example.com", "", "", "")
 	require.NoError(t, err, "add blog")
 
-	_, err = AddBlog(ctx, db, "Test", "https://other.com", "", "")
+	_, err = AddBlog(ctx, db, "Test", "https://other.com", "", "", "")
 	require.Error(t, err, "expected duplicate name error")
 
-	_, err = AddBlog(ctx, db, "Other", "https://example.com", "", "")
+	_, err = AddBlog(ctx, db, "Other", "https://example.com", "", "", "")
 	require.Error(t, err, "expected duplicate url error")
 
 	err = RemoveBlog(ctx, db, blog.Name)
 	require.NoError(t, err, "remove blog")
+}
+
+func TestAddBlogWithGroup(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	blog, err := AddBlog(ctx, db, "Test", "https://example.com", "", "", "Feed Group 1")
+	require.NoError(t, err, "add blog")
+	assert.Equal(t, "Feed Group 1", blog.Group)
+
+	fetched, err := db.GetBlogByName(ctx, "Test")
+	require.NoError(t, err, "get blog by name")
+	require.NotNil(t, fetched)
+	assert.Equal(t, "Feed Group 1", fetched.Group)
 }
 
 func TestAddBlogInvalidURL(t *testing.T) {
@@ -53,7 +68,7 @@ func TestAddBlogInvalidURL(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := AddBlog(ctx, db, "Test"+tc.name, tc.url, tc.feedURL, "")
+			_, err := AddBlog(ctx, db, "Test"+tc.name, tc.url, tc.feedURL, "", "")
 			require.Error(t, err, "expected error for invalid URL")
 
 			var invalidURLErr InvalidURLError
@@ -81,7 +96,7 @@ func TestAddBlogValidURL(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			blogName := "Valid" + tc.name
-			blog, err := AddBlog(ctx, db, blogName, tc.url, tc.feedURL, "")
+			blog, err := AddBlog(ctx, db, blogName, tc.url, tc.feedURL, "", "")
 			require.NoError(t, err, "expected no error for valid URL")
 			require.Equal(t, tc.url, blog.URL)
 			require.Equal(t, tc.feedURL, blog.FeedURL)
@@ -98,7 +113,7 @@ func TestArticleReadUnread(t *testing.T) {
 	db := openTestDB(t)
 	defer func() { require.NoError(t, db.Close()) }()
 
-	blog, err := AddBlog(ctx, db, "Test", "https://example.com", "", "")
+	blog, err := AddBlog(ctx, db, "Test", "https://example.com", "", "", "")
 	require.NoError(t, err, "add blog")
 	article, err := db.AddArticle(ctx, model.Article{BlogID: blog.ID, Title: "Title", URL: "https://example.com/1"})
 	require.NoError(t, err, "add article")
@@ -117,17 +132,17 @@ func TestGetArticlesFilters(t *testing.T) {
 	db := openTestDB(t)
 	defer func() { require.NoError(t, db.Close()) }()
 
-	blog, err := AddBlog(ctx, db, "Test", "https://example.com", "", "")
+	blog, err := AddBlog(ctx, db, "Test", "https://example.com", "", "", "")
 	require.NoError(t, err, "add blog")
 	_, err = db.AddArticle(ctx, model.Article{BlogID: blog.ID, Title: "Title", URL: "https://example.com/1"})
 	require.NoError(t, err, "add article")
 
-	articles, blogNames, err := GetArticles(ctx, db, false, "", "", nil, nil)
+	articles, blogNames, err := GetArticles(ctx, db, false, "", "", "", nil, nil)
 	require.NoError(t, err, "get articles")
 	require.Len(t, articles, 1)
 	require.Equal(t, blog.Name, blogNames[blog.ID])
 
-	_, _, err = GetArticles(ctx, db, false, "Missing", "", nil, nil)
+	_, _, err = GetArticles(ctx, db, false, "Missing", "", "", nil, nil)
 	require.Error(t, err, "expected blog not found error")
 }
 
@@ -153,7 +168,7 @@ func TestImportOPML(t *testing.T) {
 	assert.Equal(t, 0, skipped)
 
 	// Verify blogs were actually persisted.
-	blogs, err := db.ListBlogs(ctx)
+	blogs, err := db.ListBlogs(ctx, nil)
 	require.NoError(t, err)
 	assert.Len(t, blogs, 2)
 }
@@ -164,7 +179,7 @@ func TestImportOPMLSkipsDuplicates(t *testing.T) {
 	defer func() { require.NoError(t, db.Close()) }()
 
 	// Pre-add a blog that will conflict.
-	_, err := AddBlog(ctx, db, "Blog A", "http://a.com", "http://a.com/feed", "")
+	_, err := AddBlog(ctx, db, "Blog A", "http://a.com", "http://a.com/feed", "", "")
 	require.NoError(t, err)
 
 	opmlData := `<?xml version="1.0" encoding="UTF-8"?>
@@ -281,7 +296,7 @@ func TestGetArticlesFilterByCategory(t *testing.T) {
 	db := openTestDB(t)
 	defer func() { require.NoError(t, db.Close()) }()
 
-	blog, err := AddBlog(ctx, db, "Test", "https://example.com", "", "")
+	blog, err := AddBlog(ctx, db, "Test", "https://example.com", "", "", "")
 	require.NoError(t, err, "add blog")
 
 	_, err = db.AddArticle(ctx, model.Article{BlogID: blog.ID, Title: "Go Post", URL: "https://example.com/1", Categories: []string{"Go", "Programming"}})
@@ -290,15 +305,41 @@ func TestGetArticlesFilterByCategory(t *testing.T) {
 	require.NoError(t, err, "add article")
 
 	// Filter by Go
-	articles, _, err := GetArticles(ctx, db, false, "", "Go", nil, nil)
+	articles, _, err := GetArticles(ctx, db, false, "", "Go", "", nil, nil)
 	require.NoError(t, err, "get articles by category")
 	require.Len(t, articles, 1)
 	require.Equal(t, "Go Post", articles[0].Title)
 
 	// No filter returns all
-	all, _, err := GetArticles(ctx, db, false, "", "", nil, nil)
+	all, _, err := GetArticles(ctx, db, false, "", "", "", nil, nil)
 	require.NoError(t, err, "get all articles")
 	require.Len(t, all, 2)
+}
+
+func TestGetArticlesFilterByGroup(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	blogA, err := AddBlog(ctx, db, "A", "https://a.example.com", "", "", "Feed Group 1")
+	require.NoError(t, err, "add blog A")
+	blogB, err := AddBlog(ctx, db, "B", "https://b.example.com", "", "", "Feed Group 2")
+	require.NoError(t, err, "add blog B")
+
+	_, err = db.AddArticle(ctx, model.Article{BlogID: blogA.ID, Title: "A1", URL: "https://a.example.com/1"})
+	require.NoError(t, err, "add article for blog A")
+	_, err = db.AddArticle(ctx, model.Article{BlogID: blogB.ID, Title: "B1", URL: "https://b.example.com/1"})
+	require.NoError(t, err, "add article for blog B")
+
+	articles, _, err := GetArticles(ctx, db, false, "", "", "Feed Group 1", nil, nil)
+	require.NoError(t, err, "get articles by group")
+	require.Len(t, articles, 1)
+	require.Equal(t, "A1", articles[0].Title)
+
+	// Unknown group returns no results, not an error
+	articles, _, err = GetArticles(ctx, db, false, "", "", "Nonexistent", nil, nil)
+	require.NoError(t, err, "get articles by nonexistent group")
+	require.Empty(t, articles)
 }
 
 func openTestDB(t *testing.T) *storage.Database {

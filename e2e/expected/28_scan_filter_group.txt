@@ -1,0 +1,6 @@
+Scanning 1 blog(s)...
+
+  go-blog-2
+    Source: HTML | Found: 5 | New: 5
+
+Found 5 new article(s) total!

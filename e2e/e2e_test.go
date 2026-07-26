@@ -403,6 +403,55 @@ func TestE2E(t *testing.T) {
 			// ── Remove nonexistent ──
 			_, stderr = c.fail(t, []string{"remove", "nope"}, map[string]string{"yes": ""})
 			checkOutput(t, "23_remove_nonexistent", stderr, baseURL)
+
+			// ── Add grouped blogs ──
+			out = c.ok(t, []string{"add", "go-blog-2", baseURL + "/rust/"}, map[string]string{
+				"scrape-selector": ".post-list td a[href]",
+				"group":           "Team A",
+			})
+			checkOutput(t, "24_add_with_group", out, baseURL)
+
+			c.ok(t, []string{"add", "go-blog-3", baseURL + "/nowhere/"}, map[string]string{
+				"group": "Team B",
+			})
+
+			// ── Blogs list shows Group line ──
+			out = c.ok(t, []string{"blogs"}, nil)
+			checkOutput(t, "25_blogs_shows_group", out, baseURL)
+
+			// ── Blogs filtered by group, case-insensitive ──
+			out = c.ok(t, []string{"blogs"}, map[string]string{"group": "team a"})
+			checkOutput(t, "26_blogs_filter_group", out, baseURL)
+
+			// ── Blogs filtered by nonexistent group ──
+			out = c.ok(t, []string{"blogs"}, map[string]string{"group": "nonexistent"})
+			checkOutput(t, "27_blogs_filter_group_no_match", out, baseURL)
+
+			// ── Scan filtered by group ──
+			out = c.ok(t, []string{"scan"}, map[string]string{"group": "Team A"})
+			checkOutput(t, "28_scan_filter_group", out, baseURL)
+
+			// ── Scan filtered by nonexistent group ──
+			out = c.ok(t, []string{"scan"}, map[string]string{"group": "nonexistent"})
+			checkOutput(t, "29_scan_filter_group_no_match", out, baseURL)
+
+			// ── Articles filtered by group ──
+			out = c.ok(t, []string{"articles"}, map[string]string{"group": "Team A"})
+			checkOutput(t, "30_articles_filter_group", out, baseURL)
+
+			// ── Group filter returns every blog in the group, not just the first match ──
+			c.ok(t, []string{"add", "go-blog-4", baseURL + "/nowhere2/"}, map[string]string{
+				"group": "Team C",
+			})
+			c.ok(t, []string{"add", "go-blog-5", baseURL + "/nowhere3/"}, map[string]string{
+				"group": "Team C",
+			})
+			out = c.ok(t, []string{"blogs"}, map[string]string{"group": "Team C"})
+			checkOutput(t, "31_blogs_filter_group_multi", out, baseURL)
+
+			// ── Group filter is an exact match, not a prefix match ──
+			out = c.ok(t, []string{"blogs"}, map[string]string{"group": "Team"})
+			checkOutput(t, "32_blogs_filter_group_prefix_no_match", out, baseURL)
 		})
 	}
 }

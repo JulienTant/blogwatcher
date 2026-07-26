@@ -1,0 +1,1 @@
+Added blog 'go-blog-2'

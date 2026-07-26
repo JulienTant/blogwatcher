@@ -8,6 +8,7 @@ type Blog struct {
 	URL            string
 	FeedURL        string
 	ScrapeSelector string
+	Group          string
 	LastScanned    *time.Time
 }
 

@@ -58,7 +58,7 @@ func TestScanBlogRSS(t *testing.T) {
 	require.Equal(t, 2, result.NewArticles)
 	require.Equal(t, "rss", result.Source)
 
-	articles, err := db.ListArticles(ctx, false, nil, nil, nil, nil)
+	articles, err := db.ListArticles(ctx, false, nil, nil, nil, nil, nil)
 	require.NoError(t, err, "list articles")
 	require.Len(t, articles, 2)
 }
@@ -130,9 +130,69 @@ func TestScanAllBlogsConcurrent(t *testing.T) {
 		require.NoError(t, err, "add blog %s", name)
 	}
 
-	results, err := newTestScanner().ScanAllBlogs(ctx, db, 2)
+	results, err := newTestScanner().ScanAllBlogs(ctx, db, 2, "")
 	require.NoError(t, err, "scan all blogs")
 	require.Len(t, results, 2)
+}
+
+func TestScanAllBlogsFilterByGroup(t *testing.T) {
+	ctx := context.Background()
+
+	feedTemplate := `<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0"><channel><title>%s</title>
+<item><title>Post 1</title><link>https://%s.example.com/1</link></item>
+</channel></rss>`
+
+	mux := http.NewServeMux()
+	for _, name := range []string{"a", "c", "b"} {
+		feed := fmt.Sprintf(feedTemplate, name, name)
+		mux.HandleFunc("/"+name+"/feed", func(w http.ResponseWriter, r *http.Request) {
+			if _, writeErr := w.Write([]byte(feed)); writeErr != nil {
+				http.Error(w, writeErr.Error(), http.StatusInternalServerError)
+			}
+		})
+	}
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	db := openTestDB(t)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	_, err := db.AddBlog(ctx, model.Blog{
+		Name:    "Test-a",
+		URL:     "https://a.example.com",
+		FeedURL: server.URL + "/a/feed",
+		Group:   "Feed Group 1",
+	})
+	require.NoError(t, err, "add blog a")
+	_, err = db.AddBlog(ctx, model.Blog{
+		Name:    "Test-c",
+		URL:     "https://c.example.com",
+		FeedURL: server.URL + "/c/feed",
+		Group:   "Feed Group 1",
+	})
+	require.NoError(t, err, "add blog c")
+	_, err = db.AddBlog(ctx, model.Blog{
+		Name:    "Test-b",
+		URL:     "https://b.example.com",
+		FeedURL: server.URL + "/b/feed",
+		Group:   "Feed Group 2",
+	})
+	require.NoError(t, err, "add blog b")
+
+	results, err := newTestScanner().ScanAllBlogs(ctx, db, 2, "Feed Group 1")
+	require.NoError(t, err, "scan by group")
+	require.Len(t, results, 2, "both blogs in the group must be scanned, not just the first match")
+	var scanned []string
+	for _, r := range results {
+		scanned = append(scanned, r.BlogName)
+	}
+	require.ElementsMatch(t, []string{"Test-a", "Test-c"}, scanned)
+
+	// Exact match only -- a prefix of a real group name must not match.
+	results, err = newTestScanner().ScanAllBlogs(ctx, db, 2, "Feed Group")
+	require.NoError(t, err, "scan by prefix group")
+	require.Empty(t, results, "group filter must be an exact match, not a prefix match")
 }
 
 func openTestDB(t *testing.T) *storage.Database {
@@ -204,7 +264,7 @@ func TestScanBlogRSSWithCategories(t *testing.T) {
 	require.NoError(t, scanErr)
 	require.Equal(t, 2, result.NewArticles)
 
-	articles, err := db.ListArticles(ctx, false, nil, nil, nil, nil)
+	articles, err := db.ListArticles(ctx, false, nil, nil, nil, nil, nil)
 	require.NoError(t, err, "list articles")
 	require.Len(t, articles, 2)
 
@@ -298,7 +358,7 @@ func TestScanAllBlogsPartialFailure(t *testing.T) {
 	_, err = db.AddBlog(ctx, model.Blog{Name: "bad-blog", URL: "https://bad.example.com", FeedURL: server.URL + "/bad/feed"})
 	require.NoError(t, err)
 
-	results, scanErr := newTestScanner().ScanAllBlogs(ctx, db, 2)
+	results, scanErr := newTestScanner().ScanAllBlogs(ctx, db, 2, "")
 	require.NoError(t, scanErr, "ScanAllBlogs should not return an error for blog-level failures")
 	require.Len(t, results, 2)
 
@@ -343,7 +403,7 @@ func TestScanAllBlogsPartialFailureSequential(t *testing.T) {
 	_, err = db.AddBlog(ctx, model.Blog{Name: "bad-blog", URL: "https://bad.example.com", FeedURL: server.URL + "/bad/feed"})
 	require.NoError(t, err)
 
-	results, scanErr := newTestScanner().ScanAllBlogs(ctx, db, 1)
+	results, scanErr := newTestScanner().ScanAllBlogs(ctx, db, 1, "")
 	require.NoError(t, scanErr, "ScanAllBlogs should not return an error for blog-level failures")
 	require.Len(t, results, 2)
 
@@ -384,7 +444,7 @@ func TestScanAllBlogsPropagatesContextCancellation(t *testing.T) {
 	_, err := db.AddBlog(ctx, model.Blog{Name: "cancel-blog", URL: "https://cancel.example.com", FeedURL: server.URL})
 	require.NoError(t, err)
 
-	_, scanErr := newTestScanner().ScanAllBlogs(ctx, db, 1)
+	_, scanErr := newTestScanner().ScanAllBlogs(ctx, db, 1, "")
 	require.Error(t, scanErr, "should propagate context cancellation as a fatal error")
 	require.ErrorIs(t, scanErr, context.Canceled)
 }
@@ -407,7 +467,7 @@ func TestScanAllBlogsPropagatesContextCancellationConcurrent(t *testing.T) {
 	_, err := db.AddBlog(ctx, model.Blog{Name: "cancel-blog", URL: "https://cancel.example.com", FeedURL: server.URL})
 	require.NoError(t, err)
 
-	_, scanErr := newTestScanner().ScanAllBlogs(ctx, db, 2)
+	_, scanErr := newTestScanner().ScanAllBlogs(ctx, db, 2, "")
 	require.Error(t, scanErr, "should propagate context cancellation as a fatal error")
 	require.ErrorIs(t, scanErr, context.Canceled)
 }
