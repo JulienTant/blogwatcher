@@ -34,6 +34,18 @@ func TestParseDateFilter(t *testing.T) {
 	})
 }
 
+func TestStringPtrOrNil(t *testing.T) {
+	t.Run("empty string returns nil", func(t *testing.T) {
+		assert.Nil(t, stringPtrOrNil(""))
+	})
+
+	t.Run("non-empty string returns pointer to value", func(t *testing.T) {
+		got := stringPtrOrNil("Team A")
+		require.NotNil(t, got)
+		assert.Equal(t, "Team A", *got)
+	})
+}
+
 func TestParseDateRange(t *testing.T) {
 	t.Run("both empty returns nils", func(t *testing.T) {
 		since, before, err := parseDateRange("", "")
