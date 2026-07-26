@@ -1,0 +1,21 @@
+Tracked blogs (4):
+
+  github-blog
+    URL: {{SERVER}}/github/
+    Feed: {{SERVER}}/github/feed/
+    Last scanned: {{TIMESTAMP}}
+
+  go-blog
+    URL: {{SERVER}}/go/
+    Feed: {{SERVER}}/go/feed.atom
+    Last scanned: {{TIMESTAMP}}
+
+  go-blog-2
+    URL: {{SERVER}}/rust/
+    Selector: .post-list td a[href]
+    Group: Team A
+
+  go-blog-3
+    URL: {{SERVER}}/nowhere/
+    Group: Team B
+

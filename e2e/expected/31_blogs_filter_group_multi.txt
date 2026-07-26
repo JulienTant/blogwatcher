@@ -1,0 +1,10 @@
+Tracked blogs (2):
+
+  go-blog-4
+    URL: {{SERVER}}/nowhere2/
+    Group: Team C
+
+  go-blog-5
+    URL: {{SERVER}}/nowhere3/
+    Group: Team C
+
