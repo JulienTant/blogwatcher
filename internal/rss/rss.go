@@ -32,16 +32,26 @@ func (e FeedParseError) Error() string {
 
 // Fetcher fetches and parses RSS/Atom feeds.
 type Fetcher struct {
-	client *http.Client
+	client    *http.Client
+	userAgent string
 }
 
-// NewFetcher creates a Fetcher with the given HTTP client.
-func NewFetcher(client *http.Client) *Fetcher {
-	return &Fetcher{client: client}
+// NewFetcher creates a Fetcher with the given HTTP client and User-Agent.
+func NewFetcher(client *http.Client, userAgent string) *Fetcher {
+	return &Fetcher{client: client, userAgent: userAgent}
+}
+
+func (f *Fetcher) newRequest(ctx context.Context, requestURL string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", f.userAgent)
+	return req, nil
 }
 
 func (f *Fetcher) ParseFeed(ctx context.Context, feedURL string) ([]FeedArticle, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
+	req, err := f.newRequest(ctx, feedURL)
 	if err != nil {
 		return nil, FeedParseError{Message: fmt.Sprintf("failed to create request: %v", err)}
 	}
@@ -83,7 +93,7 @@ func (f *Fetcher) ParseFeed(ctx context.Context, feedURL string) ([]FeedArticle,
 }
 
 func (f *Fetcher) DiscoverFeedURL(ctx context.Context, blogURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, blogURL, nil)
+	req, err := f.newRequest(ctx, blogURL)
 	if err != nil {
 		return "", fmt.Errorf("discover feed: %w", err)
 	}
@@ -177,7 +187,7 @@ func (f *Fetcher) DiscoverFeedURL(ctx context.Context, blogURL string) (string, 
 }
 
 func (f *Fetcher) isValidFeed(ctx context.Context, feedURL string) (bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
+	req, err := f.newRequest(ctx, feedURL)
 	if err != nil {
 		return false, err
 	}

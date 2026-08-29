@@ -34,7 +34,7 @@ const sampleFeed = `<?xml version="1.0" encoding="UTF-8" ?>
 
 func newTestScanner() *Scanner {
 	client := &http.Client{Timeout: 2 * time.Second}
-	return NewScanner(rss.NewFetcher(client), scraper.NewScraper(client))
+	return NewScanner(rss.NewFetcher(client, "test-user-agent"), scraper.NewScraper(client, "test-user-agent"))
 }
 
 func TestScanBlogRSS(t *testing.T) {
