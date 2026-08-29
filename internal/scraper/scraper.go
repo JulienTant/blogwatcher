@@ -29,12 +29,13 @@ func (e ScrapeError) Error() string {
 
 // Scraper scrapes HTML pages for article links.
 type Scraper struct {
-	client *http.Client
+	client    *http.Client
+	userAgent string
 }
 
-// NewScraper creates a Scraper with the given HTTP client.
-func NewScraper(client *http.Client) *Scraper {
-	return &Scraper{client: client}
+// NewScraper creates a Scraper with the given HTTP client and User-Agent.
+func NewScraper(client *http.Client, userAgent string) *Scraper {
+	return &Scraper{client: client, userAgent: userAgent}
 }
 
 func (s *Scraper) ScrapeBlog(ctx context.Context, blogURL string, selector string) ([]ScrapedArticle, error) {
@@ -42,6 +43,7 @@ func (s *Scraper) ScrapeBlog(ctx context.Context, blogURL string, selector strin
 	if err != nil {
 		return nil, ScrapeError{Message: fmt.Sprintf("failed to create request: %v", err)}
 	}
+	req.Header.Set("User-Agent", s.userAgent)
 	response, err := s.client.Do(req)
 	if err != nil {
 		return nil, ScrapeError{Message: fmt.Sprintf("failed to fetch page: %v", err)}
