@@ -20,9 +20,25 @@ import (
 	"github.com/JulienTant/blogwatcher-cli/internal/scanner"
 	"github.com/JulienTant/blogwatcher-cli/internal/scraper"
 	"github.com/JulienTant/blogwatcher-cli/internal/storage"
+	"github.com/JulienTant/blogwatcher-cli/internal/version"
 )
 
-const httpTimeout = 30 * time.Second
+const (
+	httpTimeout          = 30 * time.Second
+	defaultUserAgentTmpl = "blogwatcher-cli/%s (+https://github.com/JulienTant/blogwatcher-cli)"
+)
+
+func defaultUserAgent() string {
+	return fmt.Sprintf(defaultUserAgentTmpl, version.Version)
+}
+
+func resolveUserAgent(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("user-agent must not be empty")
+	}
+	return value, nil
+}
 
 func withDatabase(cmd *cobra.Command, fn func(db *storage.Database) error) error {
 	db, err := storage.OpenDatabase(cmd.Context(), viper.GetString("db"))
@@ -142,10 +158,15 @@ func newScanCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			silent := viper.GetBool("silent")
 			workers := viper.GetInt("workers")
+			userAgent, err := resolveUserAgent(viper.GetString("user-agent"))
+			if err != nil {
+				printError(err)
+				return markError(err)
+			}
 
 			return withDatabase(cmd, func(db *storage.Database) error {
 				client := newHTTPClient()
-				sc := scanner.NewScanner(rss.NewFetcher(client), scraper.NewScraper(client))
+				sc := scanner.NewScanner(rss.NewFetcher(client, userAgent), scraper.NewScraper(client, userAgent))
 
 				if len(args) == 1 {
 					result, err := sc.ScanBlogByName(cmd.Context(), db, args[0])
@@ -218,6 +239,7 @@ func newScanCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolP("silent", "s", false, "Only output 'scan done' when complete")
 	cmd.Flags().IntP("workers", "w", 8, "Number of concurrent workers when scanning all blogs")
+	cmd.Flags().String("user-agent", defaultUserAgent(), "User-Agent header used for HTTP requests")
 	return cmd
 }
 

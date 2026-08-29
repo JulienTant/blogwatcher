@@ -11,7 +11,7 @@ import (
 )
 
 func newTestScraper() *Scraper {
-	return NewScraper(&http.Client{Timeout: 2 * time.Second})
+	return NewScraper(&http.Client{Timeout: 2 * time.Second}, "test-user-agent")
 }
 
 func TestScrapeBlog(t *testing.T) {
@@ -25,6 +25,7 @@ func TestScrapeBlog(t *testing.T) {
 </html>`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "test-user-agent", r.Header.Get("User-Agent"))
 		if _, writeErr := w.Write([]byte(html)); writeErr != nil {
 			http.Error(w, writeErr.Error(), http.StatusInternalServerError)
 			return

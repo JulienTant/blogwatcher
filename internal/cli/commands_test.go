@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/JulienTant/blogwatcher-cli/internal/version"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -88,4 +89,27 @@ func TestParseDateRange(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "expected YYYY-MM-DD")
 	})
+}
+
+func TestScanCommandUserAgentFlagDefaultsToDefault(t *testing.T) {
+	cmd := newScanCommand()
+
+	flag := cmd.Flags().Lookup("user-agent")
+	require.NotNil(t, flag)
+	assert.Equal(t, "blogwatcher-cli/"+version.Version+" (+https://github.com/JulienTant/blogwatcher-cli)", flag.DefValue)
+	assert.Equal(t, defaultUserAgent(), flag.Value.String())
+}
+
+func TestResolveUserAgentRejectsEmptyValue(t *testing.T) {
+	_, err := resolveUserAgent(" 	 ")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "user-agent")
+}
+
+func TestResolveUserAgentTrimsCustomValue(t *testing.T) {
+	got, err := resolveUserAgent("  MyReader/1.0  ")
+
+	require.NoError(t, err)
+	assert.Equal(t, "MyReader/1.0", got)
 }

@@ -26,8 +26,10 @@ const sampleFeed = `<?xml version="1.0" encoding="UTF-8" ?>
 </channel>
 </rss>`
 
+const testUserAgent = "test-user-agent"
+
 func newTestFetcher() *Fetcher {
-	return NewFetcher(&http.Client{Timeout: 2 * time.Second})
+	return NewFetcher(&http.Client{Timeout: 2 * time.Second}, testUserAgent)
 }
 
 func TestParseFeed(t *testing.T) {
@@ -43,6 +45,19 @@ func TestParseFeed(t *testing.T) {
 	require.NoError(t, err, "parse feed")
 	require.Len(t, articles, 2)
 	require.NotNil(t, articles[0].PublishedDate)
+}
+
+func TestParseFeedSetsUserAgent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, testUserAgent, r.Header.Get("User-Agent"))
+		if _, writeErr := w.Write([]byte(sampleFeed)); writeErr != nil {
+			http.Error(w, writeErr.Error(), http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+
+	_, err := newTestFetcher().ParseFeed(context.Background(), server.URL)
+	require.NoError(t, err, "parse feed")
 }
 
 func TestParseFeedWithCategories(t *testing.T) {
